@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 
 import argparse
-from array import array
 import json
 import re
 import os
@@ -37,9 +36,9 @@ def get_most_recent_log_filename(config: dict) -> LogfileInfo:
     for log_filename in os.listdir(config["LOG_DIR"]):
         file_match = re.match(LOG_FILE_RE, log_filename)
         if file_match:
-            cur_date_str = file_match[0][len(LOG_FILE_STARTS_WITH_STR) : len(LOG_FILE_STARTS_WITH_STR) + 11]
+            cur_date_str = file_match[0][len(LOG_FILE_STARTS_WITH_STR) : len(LOG_FILE_STARTS_WITH_STR) + 10]
             cur_date_int = int(cur_date_str.replace(".", ""))
-            if (most_recent_log_fileinfo == None) or (cur_date_int > int(most_recent_log_fileinfo.date.replace(".", ""))):
+            if (most_recent_log_fileinfo == None) or (cur_date_int > int(most_recent_log_fileinfo.date_str.replace(".", ""))):
                 most_recent_log_fileinfo = LogfileInfo(file_match[0], cur_date_str)
     return most_recent_log_fileinfo
 
