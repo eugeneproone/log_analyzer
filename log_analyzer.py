@@ -22,7 +22,8 @@ default_config = {
     "REPORT_SIZE": 1000,
     "REPORT_DIR": "./reports",
     "LOG_DIR": "./log",
-    "LOGGING_LOG_FILENAME": None
+    "LOGGING_LOG_FILENAME": None,
+    "ERRORS_THRSLD_QTY": 0
 }
 
 LogfileInfo = namedtuple('LogFileInfo', ['filename', 'date_str'])
@@ -42,29 +43,35 @@ def get_most_recent_log_filename(config: dict) -> LogfileInfo:
                 most_recent_log_fileinfo = LogfileInfo(file_match[0], cur_date_str)
     return most_recent_log_fileinfo
 
-def log_gen(log_path: Path):
-    log_file = gzip.open(log_path, mode='rt') if str(log_path).endswith('.gz') else open(log_path, 'rt')
+def compose_report_data(log_path: Path, error_thrsld_qty=0) -> dict:
+    def log_gen(log_path: Path):
+        log_file = gzip.open(log_path, mode='rt') if str(log_path).endswith('.gz') else open(log_path, 'rt')
 
-    while True:
-        line = log_file.readline()
-        if not line:
-            log_file.close()
-            break
-        yield line
+        while True:
+            line = log_file.readline()
+            if not line:
+                log_file.close()
+                break
+            yield line
 
-def compose_report_data(log_path: Path) -> dict:
     log_data_dict = {}
+    errors_qty = 0
     for line in log_gen(log_path):
-        request_url_match = re.search(r'\"GET\s+\/.*\"', line)
-        request_time_match = re.search(r'\w$', line)
+        request_url_match = re.search(r'GET\s+\S+', line)
+        request_time_match = re.search(r'\d+\.\d+$', line)
         if request_url_match and request_time_match:
-            request_url = request_url_match[0].replace('\"', '').replace('GET', '').strip()
+            request_url = request_url_match[0].replace('GET', '').strip()
             request_time = float(request_time_match[0])
-            if request_url not in log_data_dict:
-                log_data_dict[request_url] = [request_time]
-            else:
+            if request_url in log_data_dict.keys():
                 log_data_dict[request_url].append(request_time)
-
+            else:
+                log_data_dict[request_url] = [request_time]
+        else:
+            errors_qty += 1
+        if (errors_qty >= error_thrsld_qty) and (error_thrsld_qty > 0):
+            logging.exception("Parsing errors qty reached the threshold qty")
+            log_data_dict = None
+            break
     return log_data_dict
 
 def render_html_report(prepared_data: list, report_path: Path):
@@ -131,7 +138,7 @@ def main():
                 else:
                     logging.error('Unknown key in json config file: %s' % field)
                     exit(1)
-
+    used_config["ERRORS_THRSLD_QTY"] = int(used_config["ERRORS_THRSLD_QTY"])
     logging.basicConfig(filename=used_config["LOGGING_LOG_FILENAME"], format='[%(asctime)s] %(levelname).1s %(message)s', datefmt='%Y.%m.%d%H:%M:%S')
     logging.info("Used config:") #todo
     logfile_info = get_most_recent_log_filename(used_config)
@@ -148,11 +155,13 @@ def main():
         logging.warning("Report already exists. Exiting...")
         exit(0)
 
-    report_data = compose_report_data(Path(used_config["LOG_DIR"]) / logfile_info.filename)
+    report_data = compose_report_data(Path(used_config["LOG_DIR"]) / logfile_info.filename, used_config["ERRORS_THRSLD_QTY"])
+    if report_data:
+        render_html_report(report_data, Path(used_config["REPORT_DIR"] / out_report_filename))
+    else:
+        logging.error("Report si not composed because of too many errors. Exiting")
+        exit(1)
 
-    render_html_report(report_data, Path(used_config["REPORT_DIR"] / out_report_filename))
-
-    
     
 if __name__ == "__main__":
     main()
