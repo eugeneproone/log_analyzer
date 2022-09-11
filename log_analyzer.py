@@ -43,7 +43,7 @@ def get_most_recent_log_filename(config: dict) -> LogfileInfo:
                 most_recent_log_fileinfo = LogfileInfo(file_match[0], cur_date_str)
     return most_recent_log_fileinfo
 
-def compose_report_data(log_path: Path, error_thrsld_qty=0) -> dict:
+def compose_report_data(log_path: Path, error_thrsld_qty=0) -> tuple:
     def log_gen(log_path: Path):
         log_file = gzip.open(log_path, mode='rt') if str(log_path).endswith('.gz') else open(log_path, 'rt')
 
@@ -72,7 +72,7 @@ def compose_report_data(log_path: Path, error_thrsld_qty=0) -> dict:
             logging.exception("Parsing errors qty reached the threshold qty")
             log_data_dict = None
             break
-    return log_data_dict
+    return log_data_dict, errors_qty
 
 def render_html_report(prepared_data: list, report_path: Path):
     REPORT_TEMPLATE_PATH = Path("./report.html")
@@ -97,8 +97,8 @@ def prepare_data_for_json(log_data_dict: dict) -> list:
     for url in log_data_dict.keys():
         elem = log_data_dict[url]
         cur_count = len(sorted(elem))
-        cur_half_len = cur_count / 2
-        cur_median = (elem[cur_half_len] + elem[cur_half_len + 1]) / 2.0 if (cur_count % 2 == 0) else elem[cur_half_len + 1]
+        cur_middle_idx = cur_count // 2 - 1
+        cur_median = (elem[cur_middle_idx] + elem[cur_middle_idx + 1]) / 2.0 if (cur_count % 2 == 0) else elem[cur_middle_idx + 1]
         cur_sum, cur_max, cur_min, cur_avg = elem[0], elem[0], elem[0], elem[0]
         for i in elem[1:]:
             if i > cur_max:
@@ -107,7 +107,7 @@ def prepare_data_for_json(log_data_dict: dict) -> list:
                 cur_min = i
             cur_sum += i
         cur_avg = cur_sum / cur_count
-        out_list.append(dict(count=cur_count, time_avg=cur_avg, time_max=cur_max, time_sum=cur_sum, url=url, time_med=cur_median))
+        out_list.append(dict(url=url, count=cur_count, time_avg=cur_avg, time_max=cur_max, time_sum=cur_sum, time_med=cur_median))
         total_count += cur_count
         total_time += cur_sum
 
@@ -155,11 +155,12 @@ def main():
         logging.warning("Report already exists. Exiting...")
         exit(0)
 
-    report_data = compose_report_data(Path(used_config["LOG_DIR"]) / logfile_info.filename, used_config["ERRORS_THRSLD_QTY"])
+    report_data, errors_qty = compose_report_data(Path(used_config["LOG_DIR"]) / logfile_info.filename, used_config["ERRORS_THRSLD_QTY"])
     if report_data:
+        logging.info("Report data successfully composed. Errors qty: %u" % errors_qty)
         render_html_report(report_data, Path(used_config["REPORT_DIR"] / out_report_filename))
     else:
-        logging.error("Report si not composed because of too many errors. Exiting")
+        logging.error("Report data is not composed because of too many errors: %u. Exiting" % errors_qty)
         exit(1)
 
     
