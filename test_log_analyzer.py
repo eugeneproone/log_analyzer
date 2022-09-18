@@ -1,5 +1,6 @@
 import unittest
 import shutil
+import statistics
 
 from pathlib import Path
 from log_analyzer import *
@@ -83,7 +84,7 @@ class ComposeReportDataWithErrors(unittest.TestCase):
         self.assertEqual(result, self.TEST_EXPECTED_RESULT)
 
     def test_compose_report_data_should_exit_on_errors(self):
-        self.TEST_EXPECTED_RESULT = (None, 2)
+        self.TEST_EXPECTED_RESULT = (None, 4)
         result = compose_report_data(self.TEST_LOG_PATH, 2)
         self.assertEqual(result, self.TEST_EXPECTED_RESULT)
 
@@ -115,9 +116,11 @@ class PrepareDataForJsonTestCase(unittest.TestCase):
 
     def tearDown(self) -> None:
         pass
-        # if self.REPORT_PATH.exists():
-        #     self.REPORT_PATH.unlink()
             
+
+# class RenderHtmlReport(unittest.TestCase):
+#     def setUp(self):
+#         pass
 
 if __name__ == '__main__':
     unittest.main()

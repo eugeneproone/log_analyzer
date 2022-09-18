@@ -8,6 +8,7 @@ import os
 import logging
 import gzip
 import json
+import statistics
 from collections import namedtuple
 
 from pathlib import Path
@@ -28,7 +29,7 @@ default_config = {
 
 LogfileInfo = namedtuple('LogFileInfo', ['filename', 'date_str'])
 
-def get_most_recent_log_filename(config: dict) -> LogfileInfo:
+def get_most_recent_log_filename(config: dict):
     LOG_FILE_STARTS_WITH_STR = 'nginx-access-ui.log-'
     DATE_RE = r'\d{4}\.\d{2}\.\d{2}'
     LOG_FILE_RE = re.compile(LOG_FILE_STARTS_WITH_STR + DATE_RE + r'\.(log|gzip)$')
@@ -53,6 +54,7 @@ def compose_report_data(log_path: Path, error_thrsld_qty=0) -> tuple:
                 log_file.close()
                 break
             yield line
+        log_file.close()
 
     log_data_dict = {}
     errors_qty = 0
@@ -68,10 +70,9 @@ def compose_report_data(log_path: Path, error_thrsld_qty=0) -> tuple:
                 log_data_dict[request_url] = [request_time]
         else:
             errors_qty += 1
-        if (errors_qty >= error_thrsld_qty) and (error_thrsld_qty > 0):
-            logging.exception("Parsing errors qty reached the threshold qty")
-            log_data_dict = None
-            break
+    if (errors_qty >= error_thrsld_qty) and (error_thrsld_qty > 0):
+        logging.error("Parsing errors qty reached the threshold qty")
+        log_data_dict = None
     return log_data_dict, errors_qty
 
 def render_html_report(prepared_data: list, report_path: Path):
@@ -94,22 +95,15 @@ def prepare_data_for_json(log_data_dict: dict) -> list:
     
     total_time = 0.0
     total_count = 0
+
     for url in log_data_dict.keys():
         elem = log_data_dict[url]
-        cur_count = len(sorted(elem))
-        cur_middle_idx = cur_count // 2 - 1
-        cur_median = (elem[cur_middle_idx] + elem[cur_middle_idx + 1]) / 2.0 if (cur_count % 2 == 0) else elem[cur_middle_idx + 1]
-        cur_sum, cur_max, cur_min, cur_avg = elem[0], elem[0], elem[0], elem[0]
-        for i in elem[1:]:
-            if i > cur_max:
-                cur_max = i
-            if i < cur_min:
-                cur_min = i
-            cur_sum += i
-        cur_avg = cur_sum / cur_count
-        out_list.append(dict(url=url, count=cur_count, time_avg=cur_avg, time_max=cur_max, time_sum=cur_sum, time_med=cur_median))
+        cur_count = len(elem)
+        cur_sum_time = sum(elem)
+        out_list.append(dict(url=url, count=len(elem), time_avg=statistics.mean(elem),
+            time_max=max(elem), time_sum=sum(elem), time_med=statistics.median(elem)))
         total_count += cur_count
-        total_time += cur_sum
+        total_time += cur_sum_time
 
     for elem in out_list:
         elem["time_perc"] = elem["time_sum"] / total_time * 100
