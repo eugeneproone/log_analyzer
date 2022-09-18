@@ -58,16 +58,25 @@ def compose_report_data(log_path: Path, error_thrsld_qty=0) -> tuple:
 
     log_data_dict = {}
     errors_qty = 0
+# log_format ui_short '$remote_addr  $remote_user $http_x_real_ip [$time_local] "$request" '
+#                     '$status $body_bytes_sent "$http_referer" '
+#                     '"$http_user_agent" "$http_x_forwarded_for" "$http_X_REQUEST_ID" "$http_X_RB_USER" '
+#                     '$request_time';
     for line in log_gen(log_path):
-        request_url_match = re.search(r'GET\s+\S+', line)
+
+        request_url_match = re.search(r'\".*?\"', line)
         request_time_match = re.search(r'\d+\.\d+$', line)
         if request_url_match and request_time_match:
-            request_url = request_url_match[0].replace('GET', '').strip()
-            request_time = float(request_time_match[0])
-            if request_url in log_data_dict.keys():
-                log_data_dict[request_url].append(request_time)
+            try:
+                request_url = request_url_match[0].split(' ')[1]
+            except IndexError:
+                errors_qty += 1
             else:
-                log_data_dict[request_url] = [request_time]
+                request_time = float(request_time_match[0])
+                if request_url in log_data_dict.keys():
+                    log_data_dict[request_url].append(request_time)
+                else:
+                    log_data_dict[request_url] = [request_time]
         else:
             errors_qty += 1
     if (errors_qty >= error_thrsld_qty) and (error_thrsld_qty > 0):
