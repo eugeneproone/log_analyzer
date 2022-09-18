@@ -9,9 +9,9 @@ class GetMostRecentLogFilenameTestCase(unittest.TestCase):
     def setUp(self):
         self.TEST_LOGS_DIR = './test_logs_dir'
         self.TEST_LOGS_DIR_PATH = Path(self.TEST_LOGS_DIR)
-        self.CORRECT_DATE_STR = "2022.04.02"
-        self.CORRECT_FILENAME = "nginx-access-ui.log-%s.gzip" % self.CORRECT_DATE_STR
-        self.TEST_FILES = ("nginx-access-ui.log-2022.03.02.log",
+        self.CORRECT_DATE_STR = "20220402"
+        self.CORRECT_FILENAME = "nginx-access-ui.log-%s.gz" % self.CORRECT_DATE_STR
+        self.TEST_FILES = ("nginx-access-ui.log-20220302.log",
         "nginx-access-ui.log-2022.03.02.bz",
         "nginx-access-ui.log-2021.03.02.log",
         self.CORRECT_FILENAME)

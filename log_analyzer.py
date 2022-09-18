@@ -31,22 +31,22 @@ LogfileInfo = namedtuple('LogFileInfo', ['filename', 'date_str'])
 
 def get_most_recent_log_filename(config: dict):
     LOG_FILE_STARTS_WITH_STR = 'nginx-access-ui.log-'
-    DATE_RE = r'\d{4}\.\d{2}\.\d{2}'
-    LOG_FILE_RE = re.compile(LOG_FILE_STARTS_WITH_STR + DATE_RE + r'\.(log|gzip)$')
+    DATE_RE = r'\d{8}'
+    LOG_FILE_RE = re.compile(LOG_FILE_STARTS_WITH_STR + DATE_RE + r'\.(log|gz)$')
 
     most_recent_log_fileinfo = None
     for log_filename in os.listdir(config["LOG_DIR"]):
         file_match = re.match(LOG_FILE_RE, log_filename)
         if file_match:
-            cur_date_str = file_match[0][len(LOG_FILE_STARTS_WITH_STR) : len(LOG_FILE_STARTS_WITH_STR) + 10]
-            cur_date_int = int(cur_date_str.replace(".", ""))
-            if (most_recent_log_fileinfo == None) or (cur_date_int > int(most_recent_log_fileinfo.date_str.replace(".", ""))):
+            cur_date_str = file_match[0][len(LOG_FILE_STARTS_WITH_STR) : len(LOG_FILE_STARTS_WITH_STR) + 8]
+            cur_date_int = int(cur_date_str)
+            if (most_recent_log_fileinfo == None) or (cur_date_int > int(most_recent_log_fileinfo.date_str)):
                 most_recent_log_fileinfo = LogfileInfo(file_match[0], cur_date_str)
     return most_recent_log_fileinfo
 
 def compose_report_data(log_path: Path, error_thrsld_qty=0) -> tuple:
     def log_gen(log_path: Path):
-        log_file = gzip.open(log_path, mode='rt') if str(log_path).endswith('.gz') else open(log_path, 'rt')
+        log_file = gzip.open(log_path, mode='rt', encoding='utf8') if str(log_path).endswith('.gz') else open(log_path, 'rt', encoding='utf8')
 
         while True:
             line = log_file.readline()
@@ -54,14 +54,11 @@ def compose_report_data(log_path: Path, error_thrsld_qty=0) -> tuple:
                 log_file.close()
                 break
             yield line
+        logging.info("Closing log file")
         log_file.close()
 
     log_data_dict = {}
     errors_qty = 0
-# log_format ui_short '$remote_addr  $remote_user $http_x_real_ip [$time_local] "$request" '
-#                     '$status $body_bytes_sent "$http_referer" '
-#                     '"$http_user_agent" "$http_x_forwarded_for" "$http_X_REQUEST_ID" "$http_X_RB_USER" '
-#                     '$request_time';
     for line in log_gen(log_path):
 
         request_url_match = re.search(r'\".*?\"', line)
@@ -70,6 +67,7 @@ def compose_report_data(log_path: Path, error_thrsld_qty=0) -> tuple:
             try:
                 request_url = request_url_match[0].split(' ')[1]
             except IndexError:
+                logging.warning("Error in log format")
                 errors_qty += 1
             else:
                 request_time = float(request_time_match[0])
@@ -78,15 +76,17 @@ def compose_report_data(log_path: Path, error_thrsld_qty=0) -> tuple:
                 else:
                     log_data_dict[request_url] = [request_time]
         else:
+            logging.warning("Error in log format")
             errors_qty += 1
     if (errors_qty >= error_thrsld_qty) and (error_thrsld_qty > 0):
         logging.error("Parsing errors qty reached the threshold qty")
         log_data_dict = None
     return log_data_dict, errors_qty
 
-def render_html_report(prepared_data: list, report_path: Path):
+def render_html_report(prepared_data: list, report_path: Path) -> bool:
     REPORT_TEMPLATE_PATH = Path("./report.html")
-    with open(REPORT_TEMPLATE_PATH, 'rt') as template_file:
+    with open(REPORT_TEMPLATE_PATH, 'rt', encoding='utf8') as template_file:
+        logging.info("Template file opened successfully")
         template_report = template_file.read()
     STRING_TO_SUBS = '$table_json'
     write_pos = template_report.find(STRING_TO_SUBS)
@@ -94,10 +94,12 @@ def render_html_report(prepared_data: list, report_path: Path):
         logging.error('Template is broken')
         return False
 
-    with open(Path(report_path), "wt") as report_file:
+    with open(Path(report_path), "wt", encoding='utf8') as report_file:
+        logging.info("Opening report file")
         report_file.write(template_report[:write_pos])
         json.dump(prepared_data, report_file)
         report_file.write(template_report[write_pos + len(STRING_TO_SUBS):])
+        return True
 
 def prepare_data_for_json(log_data_dict: dict) -> list:
     out_list = []
@@ -128,7 +130,7 @@ def main():
     used_config = default_config
 
     if args.config_path:
-        with open(args.config_path, 'r') as config_file:
+        with open(args.config_path, 'r', encoding='utf8') as config_file:
             try:
                 config_json_data = json.load(config_file)
             except json.JSONDecodeError:
@@ -138,12 +140,13 @@ def main():
             for field in config_json_data:
                 if field in expected_fields:
                     used_config[field] = config_json_data[field]
+                    logging.info("Using '%s'='%s' param from user cfg", field, config_json_data[field])
                 else:
                     logging.error('Unknown key in json config file: %s' % field)
                     exit(1)
     used_config["ERRORS_THRSLD_QTY"] = int(used_config["ERRORS_THRSLD_QTY"])
     logging.basicConfig(filename=used_config["LOGGING_LOG_FILENAME"], format='[%(asctime)s] %(levelname).1s %(message)s', datefmt='%Y.%m.%d%H:%M:%S')
-    logging.info("Used config:") #todo
+    logging.info("Used config:") #todo print out used config
     logfile_info = get_most_recent_log_filename(used_config)
 
     if logfile_info is None:
@@ -154,14 +157,17 @@ def main():
 
     out_report_filename = "report-%s.html" % logfile_info.date_str
 
-    if out_report_filename in os.listdir(used_config["REPORT_DIR"]):
-        logging.warning("Report already exists. Exiting...")
-        exit(0)
+    if Path(used_config["REPORT_DIR"]).exists():  #todo заменить на os.???
+        if out_report_filename in os.listdir(used_config["REPORT_DIR"]):
+            logging.warning("Report already exists. Exiting...")
+            exit(0)
+    else:
+        os.mkdir(used_config["REPORT_DIR"])
 
     report_data, errors_qty = compose_report_data(Path(used_config["LOG_DIR"]) / logfile_info.filename, used_config["ERRORS_THRSLD_QTY"])
     if report_data:
         logging.info("Report data successfully composed. Errors qty: %u" % errors_qty)
-        render_html_report(report_data, Path(used_config["REPORT_DIR"] / out_report_filename))
+        render_html_report(prepare_data_for_json(report_data), Path(used_config["REPORT_DIR"]) / out_report_filename)
     else:
         logging.error("Report data is not composed because of too many errors: %u. Exiting" % errors_qty)
         exit(1)
