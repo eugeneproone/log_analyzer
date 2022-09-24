@@ -23,7 +23,6 @@ default_config = {
     "REPORT_SIZE": 1000,
     "REPORT_DIR": "./reports",
     "LOG_DIR": "./log",
-    "LOGGING_LOG_FILENAME": None,
     "ERRORS_THRSLD_QTY": 0
 }
 
@@ -35,13 +34,17 @@ def get_most_recent_log_filename(config: dict):
     LOG_FILE_RE = re.compile(LOG_FILE_STARTS_WITH_STR + DATE_RE + r'\.(log|gz)$')
 
     most_recent_log_fileinfo = None
-    for log_filename in os.listdir(config["LOG_DIR"]):
-        file_match = re.match(LOG_FILE_RE, log_filename)
-        if file_match:
-            cur_date_str = file_match[0][len(LOG_FILE_STARTS_WITH_STR) : len(LOG_FILE_STARTS_WITH_STR) + 8]
-            cur_date_int = int(cur_date_str)
-            if (most_recent_log_fileinfo == None) or (cur_date_int > int(most_recent_log_fileinfo.date_str)):
-                most_recent_log_fileinfo = LogfileInfo(file_match[0], cur_date_str)
+    log_dir_path = Path(config["LOG_DIR"])
+    if log_dir_path.exists() and log_dir_path.is_dir():
+        for log_filename in log_dir_path.iterdir():
+            file_match = re.match(LOG_FILE_RE, str(log_filename))
+            if file_match:
+                cur_date_str = file_match[0][len(LOG_FILE_STARTS_WITH_STR) : len(LOG_FILE_STARTS_WITH_STR) + 8]
+                cur_date_int = int(cur_date_str)
+                if (most_recent_log_fileinfo == None) or (cur_date_int > int(most_recent_log_fileinfo.date_str)):
+                    most_recent_log_fileinfo = LogfileInfo(file_match[0], cur_date_str)
+    else:
+        logging.info("Dir %s does not exist" % str(log_dir_path))
     return most_recent_log_fileinfo
 
 def compose_report_data(log_path: Path, error_thrsld_qty=0) -> tuple:
@@ -59,24 +62,23 @@ def compose_report_data(log_path: Path, error_thrsld_qty=0) -> tuple:
 
     log_data_dict = {}
     errors_qty = 0
-    for line in log_gen(log_path):
-
-        request_url_match = re.search(r'\".*?\"', line)
-        request_time_match = re.search(r'\d+\.\d+$', line)
+    for line_e in enumerate(log_gen(log_path), 0):
+        request_url_match = re.search(r'\".*?\"', line_e[1])
+        request_time_match = re.search(r'\d+\.\d+$', line_e[1])
         if request_url_match and request_time_match:
-            try:
-                request_url = request_url_match[0].split(' ')[1]
-            except IndexError:
-                logging.warning("Error in log format")
-                errors_qty += 1
-            else:
+            req_url_arr = request_url_match[0].split(' ')
+            if len(req_url_arr) > 1:
+                request_url = req_url_arr[1]
                 request_time = float(request_time_match[0])
                 if request_url in log_data_dict.keys():
                     log_data_dict[request_url].append(request_time)
                 else:
                     log_data_dict[request_url] = [request_time]
+            else:
+                logging.warning("Error in log format. line %u" % line_e[0])
+                errors_qty += 1
         else:
-            logging.warning("Error in log format")
+            logging.warning("Error in log format. line %u" % line_e[0])
             errors_qty += 1
     if (errors_qty >= error_thrsld_qty) and (error_thrsld_qty > 0):
         logging.error("Parsing errors qty reached the threshold qty")
@@ -111,8 +113,8 @@ def prepare_data_for_json(log_data_dict: dict) -> list:
         elem = log_data_dict[url]
         cur_count = len(elem)
         cur_sum_time = sum(elem)
-        out_list.append(dict(url=url, count=len(elem), time_avg=statistics.mean(elem),
-            time_max=max(elem), time_sum=sum(elem), time_med=statistics.median(elem)))
+        out_list.append(dict(url=url, count=len(elem), time_avg=round(statistics.mean(elem), 3),
+            time_max=round(max(elem), 3), time_sum=round(sum(elem), 3), time_med=round(statistics.median(elem))))
         total_count += cur_count
         total_time += cur_sum_time
 
@@ -125,7 +127,14 @@ def prepare_data_for_json(log_data_dict: dict) -> list:
 def main():
     arg_parser = argparse.ArgumentParser(description="Script for nginx logs parsing and for html-reports generation")
     arg_parser.add_argument('--config', nargs=1, help="Path to config file", dest='config_path', required=False)
+    arg_parser.add_argument('--log', nargs=1, help="Logging level", dest='logging_level', default=['WARNING'], required=False)
+    arg_parser.add_argument('--log-file', nargs=1, help="Logging filename", dest='logging_filename', default=None, required=False)
     args = arg_parser.parse_args()
+
+    log_filename = None if args.logging_filename is None else Path(args.logging_filename[0].strip())
+
+    logging_level = getattr(logging, args.logging_level[0].strip().upper())
+    logging.basicConfig(level=logging_level, filename=log_filename, format='[%(asctime)s] %(levelname).1s %(message)s', datefmt='%Y.%m.%d%H:%M:%S')
 
     used_config = default_config
 
@@ -144,8 +153,11 @@ def main():
                 else:
                     logging.error('Unknown key in json config file: %s' % field)
                     exit(1)
-    used_config["ERRORS_THRSLD_QTY"] = int(used_config["ERRORS_THRSLD_QTY"])
-    logging.basicConfig(filename=used_config["LOGGING_LOG_FILENAME"], format='[%(asctime)s] %(levelname).1s %(message)s', datefmt='%Y.%m.%d%H:%M:%S')
+    try:
+        used_config["ERRORS_THRSLD_QTY"] = int(used_config["ERRORS_THRSLD_QTY"])
+    except:
+        logging.error("Incorrect ERRORS_THRSLD_QTY value in config")
+        exit(1)
     logging.info("Used config:") #todo print out used config
     logfile_info = get_most_recent_log_filename(used_config)
 
@@ -154,20 +166,19 @@ def main():
         exit(0)
 
     logging.info("Most recent log path: %s" % logfile_info.filename)
-
     out_report_filename = "report-%s.html" % logfile_info.date_str
+    report_dir_path = Path(used_config["REPORT_DIR"])
 
-    if Path(used_config["REPORT_DIR"]).exists():  #todo заменить на os.???
-        if out_report_filename in os.listdir(used_config["REPORT_DIR"]):
+    if report_dir_path.exists(): 
+        if out_report_filename in os.listdir(report_dir_path):
             logging.warning("Report already exists. Exiting...")
             exit(0)
     else:
-        os.mkdir(used_config["REPORT_DIR"])
-
+        report_dir_path.mkdir(parents=True)
     report_data, errors_qty = compose_report_data(Path(used_config["LOG_DIR"]) / logfile_info.filename, used_config["ERRORS_THRSLD_QTY"])
     if report_data:
         logging.info("Report data successfully composed. Errors qty: %u" % errors_qty)
-        render_html_report(prepare_data_for_json(report_data), Path(used_config["REPORT_DIR"]) / out_report_filename)
+        render_html_report(prepare_data_for_json(report_data), report_dir_path / out_report_filename)
     else:
         logging.error("Report data is not composed because of too many errors: %u. Exiting" % errors_qty)
         exit(1)
