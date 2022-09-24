@@ -4,7 +4,6 @@
 import argparse
 import json
 import re
-import os
 import logging
 import gzip
 import json
@@ -171,7 +170,7 @@ def main():
     report_dir_path = Path(used_config["REPORT_DIR"])
 
     if report_dir_path.exists(): 
-        if out_report_filename in os.listdir(report_dir_path):
+        if out_report_filename in report_dir_path.iterdir():
             logging.warning("Report already exists. Exiting...")
             exit(0)
     else:
@@ -179,7 +178,7 @@ def main():
     report_data, errors_qty = compose_report_data(Path(used_config["LOG_DIR"]) / logfile_info.filename, used_config["ERRORS_THRSLD_QTY"])
     if report_data:
         logging.info("Report data successfully composed. Errors qty: %u" % errors_qty)
-        render_html_report(prepare_data_for_json(report_data), report_dir_path / out_report_filename)
+        exit (0 if render_html_report(prepare_data_for_json(report_data), report_dir_path / out_report_filename) else 1)
     else:
         logging.error("Report data is not composed because of too many errors: %u. Exiting" % errors_qty)
         exit(1)
