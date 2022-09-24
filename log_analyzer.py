@@ -22,7 +22,6 @@ default_config = {
     "REPORT_SIZE": 1000,
     "REPORT_DIR": "./reports",
     "LOG_DIR": "./log",
-    "ERRORS_THRSLD_QTY": 0
 }
 
 LogfileInfo = namedtuple('LogFileInfo', ['filename', 'date_str'])
@@ -126,9 +125,10 @@ def prepare_data_for_json(log_data_dict: dict) -> list:
 
 def main():
     arg_parser = argparse.ArgumentParser(description="Script for nginx logs parsing and for html-reports generation")
-    arg_parser.add_argument('--config', nargs=1, help="Path to config file", dest='config_path', required=False)
-    arg_parser.add_argument('--log', nargs=1, help="Logging level", dest='logging_level', default=['WARNING'], required=False)
-    arg_parser.add_argument('--log-file', nargs=1, help="Logging filename", dest='logging_filename', default=None, required=False)
+    arg_parser.add_argument('--config', nargs=1, help="Path to config file", dest='config_path')
+    arg_parser.add_argument('--log', nargs=1, help="Logging level", dest='logging_level', default=['WARNING'])
+    arg_parser.add_argument('--log-file', nargs=1, help="Logging filename", dest='logging_filename', default=None)
+    arg_parser.add_argument('--errors-thrshld', nargs=1, help="Parsing errors threshold value", dest='errors_thrshld', default=['0'])
     args = arg_parser.parse_args()
 
     log_filename = None if args.logging_filename is None else Path(args.logging_filename[0].strip())
@@ -137,28 +137,33 @@ def main():
     logging.basicConfig(level=logging_level, filename=log_filename, format='[%(asctime)s] %(levelname).1s %(message)s', datefmt='%Y.%m.%d%H:%M:%S')
 
     used_config = default_config
-
-    if args.config_path:
-        with open(args.config_path, 'r', encoding='utf8') as config_file:
-            try:
-                config_json_data = json.load(config_file)
-            except json.JSONDecodeError:
-                logging.error("Could not parse json file. Probably it is broken or has incorrect format")
-                exit(1)
-            expected_fields = default_config.keys()
-            for field in config_json_data:
-                if field in expected_fields:
-                    used_config[field] = config_json_data[field]
-                    logging.info("Using '%s'='%s' param from user cfg", field, config_json_data[field])
-                else:
-                    logging.error('Unknown key in json config file: %s' % field)
+    config_path = Path(args.config_path[0].strip()) if args.config_path else None
+    if config_path != None:
+        logging.info("Using given config file: %s", str(config_path))
+        if config_path.exists():
+            with open(config_path, 'r', encoding='utf8') as config_file:
+                try:
+                    config_json_data = json.load(config_file)
+                except json.JSONDecodeError:
+                    logging.error("Could not parse json file. Probably it is broken or has incorrect format")
                     exit(1)
+                expected_fields = default_config.keys()
+                for field in config_json_data:
+                    if field in expected_fields:
+                        used_config[field] = config_json_data[field]
+                        logging.info("Using '%s'='%s' param from user cfg", field, config_json_data[field])
+                    else:
+                        logging.error('Unknown key in json config file: %s', field)
+                        exit(1)
+        else:
+            logging.error("Config file %s does not exist", str(config_path))
+            exit(1)
     try:
-        used_config["ERRORS_THRSLD_QTY"] = int(used_config["ERRORS_THRSLD_QTY"])
+        errors_thrshld_qty = int(args.errors_thrshld[0].strip())
     except:
-        logging.error("Incorrect ERRORS_THRSLD_QTY value in config")
+        logging.error("Incorrect errors-thrshld argument value")
         exit(1)
-    logging.info("Used config:") #todo print out used config
+    logging.info("Used params:\r\n%s\r\nErrors threshold qty: %u\r\n Logging level: %s", used_config, errors_thrshld_qty, logging_level)
     logfile_info = get_most_recent_log_filename(used_config)
 
     if logfile_info is None:
@@ -175,7 +180,7 @@ def main():
             exit(0)
     else:
         report_dir_path.mkdir(parents=True)
-    report_data, errors_qty = compose_report_data(Path(used_config["LOG_DIR"]) / logfile_info.filename, used_config["ERRORS_THRSLD_QTY"])
+    report_data, errors_qty = compose_report_data(Path(used_config["LOG_DIR"]) / logfile_info.filename, errors_thrshld_qty)
     if report_data:
         logging.info("Report data successfully composed. Errors qty: %u" % errors_qty)
         exit (0 if render_html_report(prepare_data_for_json(report_data), report_dir_path / out_report_filename) else 1)

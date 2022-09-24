@@ -1,6 +1,5 @@
 import unittest
 import shutil
-import statistics
 
 from pathlib import Path
 from log_analyzer import *
@@ -28,7 +27,6 @@ class GetMostRecentLogFilenameTestCase(unittest.TestCase):
             "REPORT_SIZE": 1000,
             "REPORT_DIR": "./reports",
             "LOG_DIR": self.TEST_LOGS_DIR,
-            "LOGGING_LOG_FILENAME": None
         })
         self.assertIsNotNone(log_fileinfo)
         self.assertEqual(log_fileinfo.filename, self.CORRECT_FILENAME)
@@ -116,11 +114,6 @@ class PrepareDataForJsonTestCase(unittest.TestCase):
 
     def tearDown(self) -> None:
         pass
-            
-
-# class RenderHtmlReport(unittest.TestCase):
-#     def setUp(self):
-#         pass
 
 if __name__ == '__main__':
     unittest.main()
