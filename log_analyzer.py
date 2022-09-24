@@ -37,7 +37,7 @@ def get_most_recent_log_filename(config: dict):
     log_dir_path = Path(config["LOG_DIR"])
     if log_dir_path.exists() and log_dir_path.is_dir():
         for log_filename in log_dir_path.iterdir():
-            file_match = re.match(LOG_FILE_RE, str(log_filename))
+            file_match = re.match(LOG_FILE_RE, log_filename.name)
             if file_match:
                 cur_date_str = file_match[0][len(LOG_FILE_STARTS_WITH_STR) : len(LOG_FILE_STARTS_WITH_STR) + 8]
                 cur_date_int = int(cur_date_str)
@@ -104,24 +104,25 @@ def render_html_report(prepared_data: list, report_path: Path) -> bool:
         return True
 
 def prepare_data_for_json(log_data_dict: dict) -> list:
+    PRECISION = 3
     out_list = []
     
     total_time = 0.0
     total_count = 0
 
     for url in log_data_dict.keys():
+        log_data_dict[url].sort()
         elem = log_data_dict[url]
         cur_count = len(elem)
-        cur_sum_time = sum(elem)
-        out_list.append(dict(url=url, count=len(elem), time_avg=round(statistics.mean(elem), 3),
-            time_max=round(max(elem), 3), time_sum=round(sum(elem), 3), time_med=round(statistics.median(elem))))
+        cur_sum_time = round(sum(elem), PRECISION)
+        out_list.append(dict(url=url, count=len(elem), time_avg=round(statistics.fmean(elem), PRECISION),
+            time_max=round(max(elem), PRECISION), time_sum=cur_sum_time, time_med=round(statistics.median(elem), PRECISION)))
         total_count += cur_count
         total_time += cur_sum_time
 
     for elem in out_list:
-        elem["time_perc"] = elem["time_sum"] / total_time * 100
-        elem["count_perc"] = elem["count"] / total_count * 100
-    
+        elem["time_perc"] = round(elem["time_sum"] / total_time * 100, PRECISION)
+        elem["count_perc"] = round(elem["count"] / total_count * 100, PRECISION)
     return out_list
 
 def main():
