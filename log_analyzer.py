@@ -42,7 +42,7 @@ def get_most_recent_log_filename(config: dict):
                 if (most_recent_log_fileinfo == None) or (cur_date_int > int(most_recent_log_fileinfo.date_str)):
                     most_recent_log_fileinfo = LogfileInfo(file_match[0], cur_date_str)
     else:
-        logging.info("Dir %s does not exist" % str(log_dir_path))
+        logging.info("Dir %s does not exist" % log_dir_path)
     return most_recent_log_fileinfo
 
 def compose_report_data(log_path: Path, error_thrsld_qty=0) -> tuple:
@@ -60,9 +60,9 @@ def compose_report_data(log_path: Path, error_thrsld_qty=0) -> tuple:
 
     log_data_dict = {}
     errors_qty = 0
-    for line_e in enumerate(log_gen(log_path), 0):
-        request_url_match = re.search(r'\".*?\"', line_e[1])
-        request_time_match = re.search(r'\d+\.\d+$', line_e[1])
+    for line_num, line in enumerate(log_gen(log_path), 0):
+        request_url_match = re.search(r'\".*?\"', line)
+        request_time_match = re.search(r'\d+\.\d+$', line)
         if request_url_match and request_time_match:
             req_url_arr = request_url_match[0].split(' ')
             if len(req_url_arr) > 1:
@@ -73,10 +73,10 @@ def compose_report_data(log_path: Path, error_thrsld_qty=0) -> tuple:
                 else:
                     log_data_dict[request_url] = [request_time]
             else:
-                logging.warning("Error in log format. line %u" % line_e[0])
+                logging.warning("Error in log format. line %u : %s" % (line_num, line))
                 errors_qty += 1
         else:
-            logging.warning("Error in log format. line %u" % line_e[0])
+            logging.warning("Error in log format. line %u : %s" % (line_num, line))
             errors_qty += 1
     if (errors_qty >= error_thrsld_qty) and (error_thrsld_qty > 0):
         logging.error("Parsing errors qty reached the threshold qty")
@@ -85,30 +85,39 @@ def compose_report_data(log_path: Path, error_thrsld_qty=0) -> tuple:
 
 def render_html_report(prepared_data: list, report_path: Path) -> bool:
     REPORT_TEMPLATE_PATH = Path("./report.html")
-    with open(REPORT_TEMPLATE_PATH, 'rt', encoding='utf8') as template_file:
-        logging.info("Template file opened successfully")
-        template_report = template_file.read()
-    STRING_TO_SUBS = '$table_json'
-    write_pos = template_report.find(STRING_TO_SUBS)
-    if write_pos < 0:
-        logging.error('Template is broken')
-        return False
+    result = True
+    if REPORT_TEMPLATE_PATH.exists() and REPORT_TEMPLATE_PATH.is_file():
+        with open(REPORT_TEMPLATE_PATH, 'rt', encoding='utf8') as template_file:
+            logging.info("Template file opened successfully: %s", REPORT_TEMPLATE_PATH)
+            template_report = template_file.read()
+        STRING_TO_SUBS = '$table_json'
+        write_pos = template_report.find(STRING_TO_SUBS)
+        if write_pos < 0:
+            logging.error('Template is broken')
+            result = False
 
-    with open(Path(report_path), "wt", encoding='utf8') as report_file:
-        logging.info("Opening report file")
-        report_file.write(template_report[:write_pos])
-        json.dump(prepared_data, report_file)
-        report_file.write(template_report[write_pos + len(STRING_TO_SUBS):])
-        return True
+        with open(Path(report_path), "wt", encoding='utf8') as report_file:
+            logging.info("Opening report file: %s", Path(report_path))
+            report_file.write(template_report[:write_pos])
+            json.dump(prepared_data, report_file)
+            report_file.write(template_report[write_pos + len(STRING_TO_SUBS):])
+            result = True
+    else:
+        result = False
+    return result
 
-def prepare_data_for_json(log_data_dict: dict) -> list:
+def prepare_data_for_json(log_data_dict: dict, report_size_urls=0) -> list:
     PRECISION = 3
     out_list = []
     
     total_time = 0.0
     total_count = 0
 
-    for url in log_data_dict.keys():
+    urls_tpl = tuple(log_data_dict.keys()) if (report_size_urls == 0) else tuple(log_data_dict.keys())[0:report_size_urls]
+
+    logging.info("Used URLs limit: %u. So only %u urls will be rendered to report", report_size_urls, len(urls_tpl))
+
+    for url in urls_tpl:
         log_data_dict[url].sort()
         elem = log_data_dict[url]
         cur_count = len(elem)
@@ -139,7 +148,7 @@ def main():
     used_config = default_config
     config_path = Path(args.config_path[0].strip()) if args.config_path else None
     if config_path != None:
-        logging.info("Using given config file: %s", str(config_path))
+        logging.info("Using given config file: %s", config_path)
         if config_path.exists():
             with open(config_path, 'r', encoding='utf8') as config_file:
                 try:
@@ -156,7 +165,7 @@ def main():
                         logging.error('Unknown key in json config file: %s', field)
                         exit(1)
         else:
-            logging.error("Config file %s does not exist", str(config_path))
+            logging.error("Config file %s does not exist", config_path)
             exit(1)
     try:
         errors_thrshld_qty = int(args.errors_thrshld[0].strip())
@@ -183,7 +192,7 @@ def main():
     report_data, errors_qty = compose_report_data(Path(used_config["LOG_DIR"]) / logfile_info.filename, errors_thrshld_qty)
     if report_data:
         logging.info("Report data successfully composed. Errors qty: %u" % errors_qty)
-        exit (0 if render_html_report(prepare_data_for_json(report_data), report_dir_path / out_report_filename) else 1)
+        exit (0 if render_html_report(prepare_data_for_json(report_data, used_config['REPORT_SIZE']), report_dir_path / out_report_filename) else 1)
     else:
         logging.error("Report data is not composed because of too many errors: %u. Exiting" % errors_qty)
         exit(1)
